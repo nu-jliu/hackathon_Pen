@@ -48,9 +48,11 @@ try:
         if not depth_frame or not color_frame:
             continue
 
-        # Convert images to numpy arrays
+
         depth_image = np.asanyarray(depth_frame.get_data())
         color_image = np.asanyarray(color_frame.get_data())
+        
+        print(depth_image.shape)
 
         # Apply colormap on depth image (image must be converted to 8-bit per pixel first)
         depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)

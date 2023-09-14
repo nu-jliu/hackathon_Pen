@@ -11,7 +11,7 @@ import argparse
 
 
 
-def handler(sig_num):
+def handler(sig_num, frame):
     sys.exit()
 
 if __name__ == '__main__':
@@ -50,10 +50,15 @@ if __name__ == '__main__':
             config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
         pipeline.start(config)
         
+        align_to = rs.stream.color
+        align = rs.align(align_to)
+        
         while True:
             frames = pipeline.wait_for_frames()
-            depth_frame = frames.get_depth_frame()
-            color_frame = frames.get_color_frame()
+            
+            aligned_frames = align.process(frames)
+            depth_frame = aligned_frames.get_depth_frame()
+            color_frame = aligned_frames.get_color_frame()
             if not color_frame or not depth_frame:
                 continue
             
@@ -72,24 +77,78 @@ if __name__ == '__main__':
         
         
             mask = cv.inRange(hsv, purple_min, purple_max)
+            
+            kernel = np.ones((5, 5), dtype=np.uint8)
+            
             res = cv.bitwise_and(color_image, color_image, mask=mask)
+            res = cv.erode(res, kernel, iterations = 1)
+            res = cv.dilate(res, kernel, iterations = 1)
             # res_depth = cv.bitwise_and(depth_colormap, depth_colormap, mask=mask)
                 
             gray = cv.cvtColor(res, cv.COLOR_BGR2GRAY)
             # ret, thresh = cv.threshold(gray, 127, 255, 0)
-            contours,hir = cv.findContours(gray, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
+            contours, hir = cv.findContours(gray, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
+            
+            list_countour = list(contours)
+            list_countour.sort(key=lambda x:
+                cv.arcLength(x, True),
+                reverse=True  
+            )
             
             contour_use = []
-            for c in contours:
-                if cv.arcLength(c, True) > 220 and len(c) > 5:
+            center_x: float = 0
+            center_y: float = 0
+            count = 0
+            
+            # casecade = cv.CascadeClassifier(f"{os.path.dirname(os.path.realpath(__file__))}/face_cascade.xml")
+            # gray_color = cv.cvtColor(color_image, cv.COLOR_RGB2GRAY)
+
+            # faces = casecade.detectMultiScale(
+            #     gray_color,
+            #     scaleFactor=1.1,
+            #     minNeighbors=5,
+            #     minSize=(30, 30),
+            #     flags = cv.CASCADE_SCALE_IMAGE
+            # )
+
+            # for (x, y, w, h) in faces:
+            #     cv.rectangle(color_image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            
+            for c in list_countour[:2]:
+                if cv.arcLength(c, True) > 100 and len(c) > 5:
                     contour_use.append(c)
                     ellipse = cv.fitEllipse(c)
                     cv.ellipse(res, ellipse, (255, 255, 255), 2)
                     
                     x,y,w,h = cv.boundingRect(c)
                     cv.rectangle(res,(x,y),(x+w,y+h),(0,0,128),2)
+                    
+                    M = cv.moments(c)
+                    # print(M)
+                    if M['m00'] != 0:
+                        cx = int(M['m10']/M['m00'])
+                        cy = int(M['m01']/M['m00'])
+                    else:
+                        continue
+                    
+                    center_x += cx
+                    center_y += cy
+                    
+                    count += 1
+                    
+            if count > 0:
+                center_x = int(center_x / count)
+                center_y = int(center_y / count)
+                # print(center_x)
+                # print(center_y)
             
-            cv.drawContours(color_image, contour_use, -1, (255, 255, 255), 3)
+                color_image = cv.circle(color_image, (center_x, center_y), radius=2, color=(245, 245, 50), thickness=5)
+            
+                dist_pen = depth_frame.get_distance(center_x, center_y)
+                print(f"Distance = {dist_pen} meter")
+                # print(depth_frame.get_distance(center_x, center_y))
+            
+            cv.drawContours(depth_colormap, contour_use, -1, (255, 255, 255), 3)
             # cv.drawContours(res, contour_use, -1, (255, 255, 255), 3)
                 
             # for c in contours:
@@ -105,11 +164,11 @@ if __name__ == '__main__':
                 
             # cv.namedWindow('Realsense', cv.WINDOW_AUTOSIZE)
             # cv.imshow("Realsense", images)
-            cv.imshow("org", images_color)
+            cv.imshow("Image", images_color)
             # cv.imshow('depth', images_depth)
             cv.imshow("mask", mask)
             # cv.imshow("res", res)
-            print(len(contours))
+            # print(len(contours))
             # print(color_image[0][0])
             # print(depth_colormap[0][0])
             

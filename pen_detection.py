@@ -3,7 +3,7 @@ from __future__ import print_function
 
 import sys
 import os
-import cv2 as cv
+import cv2
 import pyrealsense2 as rs
 import numpy as np
 import signal
@@ -65,33 +65,36 @@ if __name__ == '__main__':
             color_image = np.asanyarray(color_frame.get_data())
             depth_image = np.asanyarray(depth_frame.get_data())
             
-            depth_colormap = cv.applyColorMap(cv.convertScaleAbs(depth_image, alpha=0.03), cv.COLORMAP_JET)
+            depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
             
             # print(depth_colormap.shape)
             
             
-            hsv = cv.cvtColor(color_image, cv.COLOR_BGR2HSV)
+            hsv = cv2.cvtColor(color_image, cv2.COLOR_BGR2HSV)
             
-            purple_min = np.array([110, 70, 10])
-            purple_max = np.array([125, 220, 160])
+            purple_min = np.array([110, 100, 100])
+            purple_max = np.array([130, 255, 255])
         
         
-            mask = cv.inRange(hsv, purple_min, purple_max)
-            
             kernel = np.ones((5, 5), dtype=np.uint8)
+            mask = cv2.inRange(hsv, purple_min, purple_max)
+            mask = cv2.erode(mask, kernel, iterations = 1)
+            mask = cv2.dilate(mask, kernel, iterations = 6)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
             
-            res = cv.bitwise_and(color_image, color_image, mask=mask)
-            res = cv.erode(res, kernel, iterations = 1)
-            res = cv.dilate(res, kernel, iterations = 1)
-            # res_depth = cv.bitwise_and(depth_colormap, depth_colormap, mask=mask)
+            
+            res = cv2.bitwise_and(color_image, color_image, mask=mask)
+            
+            # res_depth = cv2.bitwise_and(depth_colormap, depth_colormap, mask=mask)
                 
-            gray = cv.cvtColor(res, cv.COLOR_BGR2GRAY)
-            # ret, thresh = cv.threshold(gray, 127, 255, 0)
-            contours, hir = cv.findContours(gray, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
+            gray = cv2.cvtColor(res, cv2.COLOR_BGR2GRAY)
+            # ret, thresh = cv2.threshold(gray, 127, 255, 0)
+            contours, hir = cv2.findContours(gray, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
             
             list_countour = list(contours)
             list_countour.sort(key=lambda x:
-                cv.arcLength(x, True),
+                cv2.arcLength(x, True),
                 reverse=True  
             )
             
@@ -100,30 +103,30 @@ if __name__ == '__main__':
             center_y: float = 0
             count = 0
             
-            # casecade = cv.CascadeClassifier(f"{os.path.dirname(os.path.realpath(__file__))}/face_cascade.xml")
-            # gray_color = cv.cvtColor(color_image, cv.COLOR_RGB2GRAY)
+            casecade = cv2.CascadeClassifier(f"{os.path.dirname(os.path.realpath(__file__))}/face_cascade.xml")
+            gray_color = cv2.cvtColor(color_image, cv2.COLOR_RGB2GRAY)
 
-            # faces = casecade.detectMultiScale(
-            #     gray_color,
-            #     scaleFactor=1.1,
-            #     minNeighbors=5,
-            #     minSize=(30, 30),
-            #     flags = cv.CASCADE_SCALE_IMAGE
-            # )
+            faces = casecade.detectMultiScale(
+                gray_color,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(30, 30),
+                flags = cv2.CASCADE_SCALE_IMAGE
+            )
 
-            # for (x, y, w, h) in faces:
-            #     cv.rectangle(color_image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            for (x, y, w, h) in faces:
+                cv2.rectangle(color_image, (x, y), (x + w, y + h), (0, 255, 0), 2)
             
-            for c in list_countour[:2]:
-                if cv.arcLength(c, True) > 100 and len(c) > 5:
+            for c in list_countour[:1]:
+                if cv2.arcLength(c, True) > 100 and len(c) > 5:
                     contour_use.append(c)
-                    ellipse = cv.fitEllipse(c)
-                    cv.ellipse(res, ellipse, (255, 255, 255), 2)
+                    # ellipse = cv2.fitEllipse(c)
+                    # cv2.ellipse(res, ellipse, (255, 255, 255), 2)
                     
-                    x,y,w,h = cv.boundingRect(c)
-                    cv.rectangle(res,(x,y),(x+w,y+h),(0,0,128),2)
+                    x,y,w,h = cv2.boundingRect(c)
+                    cv2.rectangle(res,(x,y),(x+w,y+h),(0,0,128),2)
                     
-                    M = cv.moments(c)
+                    M = cv2.moments(c)
                     # print(M)
                     if M['m00'] != 0:
                         cx = int(M['m10']/M['m00'])
@@ -142,17 +145,20 @@ if __name__ == '__main__':
                 # print(center_x)
                 # print(center_y)
             
-                color_image = cv.circle(color_image, (center_x, center_y), radius=2, color=(245, 245, 50), thickness=5)
+                color_image = cv2.circle(color_image, (center_x, center_y), radius=2, color=(245, 245, 50), thickness=5)
             
                 dist_pen = depth_frame.get_distance(center_x, center_y)
-                print(f"Distance = {dist_pen} meter")
+                msg = f"x: {center_x} y: {center_y} dist: {dist_pen}m"
+                
+                images_color = cv2.putText(color_image, msg, (center_x, center_y), cv2.FONT_HERSHEY_SIMPLEX, 
+                   0.6, (255, 255, 255), 2, cv2.LINE_AA)
                 # print(depth_frame.get_distance(center_x, center_y))
             
-            cv.drawContours(depth_colormap, contour_use, -1, (255, 255, 255), 3)
-            # cv.drawContours(res, contour_use, -1, (255, 255, 255), 3)
+            cv2.drawContours(depth_colormap, contour_use, -1, (255, 255, 255), 3)
+            # cv2.drawContours(res, contour_use, -1, (255, 255, 255), 3)
                 
             # for c in contours:
-            #     area = cv.arcLength(c, True)
+            #     area = cv2.arcLength(c, True)
             #     # if area < 100:
             #         # contours.remove(c)
                 
@@ -162,17 +168,17 @@ if __name__ == '__main__':
             # print(color_image.shape, mask.shape, res.shape, mask_3d.shape)
             
                 
-            # cv.namedWindow('Realsense', cv.WINDOW_AUTOSIZE)
-            # cv.imshow("Realsense", images)
-            cv.imshow("Image", images_color)
-            # cv.imshow('depth', images_depth)
-            cv.imshow("mask", mask)
-            # cv.imshow("res", res)
+            # cv2.namedWindow('Realsense', cv2.WINDOW_AUTOSIZE)
+            # cv2.imshow("Realsense", images)
+            cv2.imshow("Image", images_color)
+            # cv2.imshow('depth', images_depth)
+            cv2.imshow("mask", mask)
+            # cv2.imshow("res", res)
             # print(len(contours))
             # print(color_image[0][0])
             # print(depth_colormap[0][0])
             
-            cv.waitKey(1)
+            cv2.waitKey(1)
 
     except Exception as e:
         print(e)

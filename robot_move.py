@@ -15,4 +15,8 @@ if __name__ == '__main__':
     #     elif mode == "g":
     #         robot.gripper.grasp()
     #     elif mode == "m":
-    robot.arm.set_ee_pose_components(x=0.25, y=0, z=0.2)
+    robot.gripper.release()
+    robot.gripper.grasp()
+    robot.arm.go_to_sleep_pose()
+    print(robot.arm.get_ee_pose())
+    # robot.arm.set_ee_pose_components(x=0.15, y=0, z=0.1)

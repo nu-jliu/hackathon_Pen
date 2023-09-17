@@ -178,4 +178,6 @@ if __name__ == '__main__':
         print(e)
         
     finally:
-        pipeline.stop()
+        # pipeline.stop()
+        print("ERROR")
+        pass

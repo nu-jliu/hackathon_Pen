@@ -310,12 +310,9 @@ def find_robot_go_pos(print_raw=False, print_sol=False, num_sample=10):
         print(e)
         
     finally:
-<<<<<<< HEAD
         # pipeline.stop()
         print("ERROR")
         pass
-=======
-        pipeline.stop()
         
 def run_robot(robot: InterbotixManipulatorXS):
     """Function that reads the target position and moves the robot to it
@@ -385,4 +382,3 @@ if __name__ == '__main__':
     
     # thread_find_pos.join()
     # thread_drive_bot.join()
->>>>>>> a1a2bf517f3b18586e23b57d59bfe611e2919954

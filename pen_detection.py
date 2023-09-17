@@ -3,15 +3,17 @@ from interbotix_xs_modules.xs_robot.arm import InterbotixManipulatorXS
 
 import sys
 import os
+import time
+import signal
+import threading
+import argparse
 import cv2
 import pyrealsense2 as rs
 import numpy as np
-import signal
-import argparse
-import time
-import threading
 import mmap
 import math
+
+FILE_PATH = os.path.dirname(os.path.realpath(__file__))
 
 ROT_MAT = np.array([[-1,  0,  0], 
                     [ 0,  0, -1], 
@@ -22,26 +24,39 @@ ROT_MAT = np.array([[-1,  0,  0],
 #                           [ 0, -1,  0, 0.0622], 
 #                           [ 0,  0,  0,      1]])
 
-EE_SLEEP_CAM = np.array([ 0.108025, 
-                         -0.025437, 
-                          0.333000])
+EE_SLEEP_CAM = np.array([ 0.11023231506347656, 
+                         -0.02791163429617882, 
+                          0.3696000099182129])
 
 EE_SLEEP_ROBOT = np.array([0.09514376, 
                            0, 
                            0.07439646])
 
 
-X_BASE = -0.1056 - 0.1
-Y_BASE = 0.0650
+# X_BASE = -0.1056 - 0.1
+# Y_BASE = 0.0650
 
 target_robot_pos = []
 LOCK = threading.Lock()
 
-def handler(sig_num, frame):
+def handler(sig_num: int, frame):
+    """signal handler, used for exit the program quietly
+
+    Args:
+        sig_num (int): signal number
+        frame (Frame): program frame, not used
+    """
+    
     sys.exit()
     
 def face_detection(img):
-    casecade = cv2.CascadeClassifier(f"{os.path.dirname(os.path.realpath(__file__))}/face_cascade.xml")
+    """Face detection algorithm, detect the face and add rectange around it
+
+    Args:
+        img (Image): image for face detection
+    """
+    
+    casecade = cv2.CascadeClassifier(f"{FILE_PATH}/face_cascade.xml")
     gray_color = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
     faces = casecade.detectMultiScale(
@@ -56,6 +71,15 @@ def face_detection(img):
         cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
         
 def find_robot_go_pos(print_raw=False, print_sol=False, num_sample=10):
+    """Run the cv algorithm and find the target position the robot goes
+
+    Args:
+        print_raw (bool, optional): tell the program whether to print the . Defaults to False.
+        print_sol (bool, optional): _description_. Defaults to False.
+        num_sample (int, optional): _description_. Defaults to 10.
+    """
+    
+    
     try:
         # Create a context object. This object owns the handles to all connected realsense devices
         pipeline = rs.pipeline()
@@ -219,8 +243,8 @@ def find_robot_go_pos(print_raw=False, print_sol=False, num_sample=10):
                         end_y = end_pos[1]
                         end_z = end_pos[2]
                         
-                        x_dist = x_data - X_BASE
-                        y_dist = (y_data - Y_BASE) - 0.1 
+                        # x_dist = x_data - X_BASE
+                        # y_dist = (y_data - Y_BASE) - 0.1 
                         
                         LOCK.acquire()
                         global target_robot_pos
@@ -240,6 +264,11 @@ def find_robot_go_pos(print_raw=False, print_sol=False, num_sample=10):
             msg = "x: {:.6f}m y: {:.6f}m z: {:.6f}m".format(x_val, y_val, z_val)
             if print_raw:
                 print(msg)
+                with open(f'{FILE_PATH}/calibrate.dat', 'w') as f:
+                    f.write(f'{x_val}\n')
+                    f.write(f'{y_val}\n')
+                    f.write(f'{z_val}')
+                    f.close()
                 
             cv2.putText(
                 color_image, 
@@ -283,7 +312,16 @@ def find_robot_go_pos(print_raw=False, print_sol=False, num_sample=10):
     finally:
         pipeline.stop()
         
-def run_robot(bot: InterbotixManipulatorXS):
+def run_robot(robot: InterbotixManipulatorXS):
+    """Function that reads the target position and moves the robot to it
+
+    Args:
+        robot (InterbotixManipulatorXS): the object of the robot controller
+    """
+    
+    robot.arm.go_to_sleep_pose()
+    robot.gripper.release()
+    
     while True:
         global target_robot_pos
         LOCK.acquire()
@@ -291,37 +329,54 @@ def run_robot(bot: InterbotixManipulatorXS):
             data = target_robot_pos.pop(0)
         except IndexError:
             LOCK.release()
+            
+            time.sleep(2)
             print("ERROR: not enough data")
         else:
             print(data)
             LOCK.release()
 
-            bot.arm.go_to_sleep_pose()
-            bot.gripper.release()
-            if bot.arm.set_ee_pose_components(x=data[0], y=data[1], z=data[2]):
+            # bot.arm.go_to_sleep_pose()
+            # bot.gripper.release()
+            if robot.arm.set_ee_pose_components(x=data[0], y=data[1], z=data[2])[1]:
             # bot.arm.set_ee_cartesian_trajectory(x=data[0], y=data[1], z=data[2])
             # bot.arm.s
+                # print("Go")
                 time.sleep(1)
-                bot.gripper.grasp()
+                robot.gripper.grasp()
                 
-                time.sleep(2)
-                bot.arm.set_ee_pose_components(x=0, y=-0.25, z=0.25)
-                bot.gripper.release()
+                time.sleep(1)
+                if robot.arm.set_ee_pose_components(x=-0.2, y=0, z=0.25)[1]:
+                
+                # time.sleep(2)
+                    robot.gripper.release()
+                
+            time.sleep(2)
+            robot.arm.go_to_sleep_pose()
+            robot.gripper.release()
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--calibrate', help='Calibrate the camera location', action='store_true')
+    parser.add_argument('-r', '--run', help='Run the pen detection cv and move the robot', action='store_true')
+    parser.add_argument('-d', '--debug', help='Debug the program by printing the target location calculated', action='store_true')
+    args = parser.parse_args()
+    
     signal.signal(signal.SIGINT, handler)
     bot = InterbotixManipulatorXS("px100", "arm", "gripper")
     
-    print_xyz = False
-    print_pos = False
-    num_sample = 15
+    print_xyz = args.calibrate
+    print_pos = args.debug
+    num_sample = 5
     
     thread_find_pos = threading.Thread(target=find_robot_go_pos, args=[print_xyz, print_pos, num_sample])
-    thread_drive_bot = threading.Thread(target=run_robot, args=[bot])
+    if args.run:
+        thread_drive_bot = threading.Thread(target=run_robot, args=[bot])
     
     
     thread_find_pos.start()
-    thread_drive_bot.start()
+    if args.run:
+        thread_drive_bot.start()
     
     # thread_find_pos.join()
     # thread_drive_bot.join()

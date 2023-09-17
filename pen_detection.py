@@ -13,10 +13,23 @@ import threading
 import mmap
 import math
 
-MAT_TRANSFORM = np.array([[-0.271,  0.242,  0.050, -0.1208], 
-                          [-0.064, -0.118, -0.741,  0.1228], 
-                          [-0.180,  0.890,      0,  0.3400], 
-                          [    0,      0,      0,        1]])
+ROT_MAT = np.array([[-1,  0,  0], 
+                    [ 0,  0, -1], 
+                    [ 0, -1,  0]])
+
+# MAT_TRANSFORM = np.array([[-1,  0,  0, 0.2023], 
+#                           [ 0,  0, -1, 0.3362], 
+#                           [ 0, -1,  0, 0.0622], 
+#                           [ 0,  0,  0,      1]])
+
+EE_SLEEP_CAM = np.array([ 0.108025, 
+                         -0.025437, 
+                          0.333000])
+
+EE_SLEEP_ROBOT = np.array([0.09514376, 
+                           0, 
+                           0.07439646])
+
 
 X_BASE = -0.1056 - 0.1
 Y_BASE = 0.0650
@@ -42,7 +55,7 @@ def face_detection(img):
     for (x, y, w, h) in faces:
         cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
         
-def find_robot_go_pos(print_raw=False, print_sol=False):
+def find_robot_go_pos(print_raw=False, print_sol=False, num_sample=10):
     try:
         # Create a context object. This object owns the handles to all connected realsense devices
         pipeline = rs.pipeline()
@@ -80,6 +93,14 @@ def find_robot_go_pos(print_raw=False, print_sol=False):
         
         align_to = rs.stream.color
         align = rs.align(align_to)
+        
+        num_data = 0
+        x_data = 0.0
+        y_data = 0.0
+        z_data = 0.0
+        x_val = 0.0
+        y_val = 0.0
+        z_val = 0.0
         
         while True:
             frames = pipeline.wait_for_frames()
@@ -129,8 +150,6 @@ def find_robot_go_pos(print_raw=False, print_sol=False):
             center_y: float = 0
             count = 0
             
-            
-            
             for c in list_countour[:1]:
                 if cv2.arcLength(c, True) > 100 and len(c) > 5:
                     contour_use.append(c)
@@ -170,32 +189,68 @@ def find_robot_go_pos(print_raw=False, print_sol=False):
                 
                 if pen_x != 0 and pen_y != 0 and pen_z != 0:
                     
-                
-                    msg = "x: {:.4f}m y: {:.4f}m z: {:.4f}m".format(pen_x, pen_y, pen_z)
-                    if print_raw:
-                        print(msg)
+                    x_data += pen_x
+                    y_data += pen_y
+                    z_data += pen_z
                     
-                    end_pos = np.matmul(np.linalg.inv(MAT_TRANSFORM), np.array([[pen_x], [pen_y], [pen_z], [1]]))
-                    if print_sol:
-                        print(end_pos)
-                    
-                    end_x = end_pos[0][0]
-                    end_y = end_pos[1][0]
-                    end_z = end_pos[2][0]
-                    
-                    x_dist = pen_x - X_BASE
-                    y_dist = (pen_y - Y_BASE) - 0.1 
-                    
-                    LOCK.acquire()
-                    global target_robot_pos
-                    # target_robot_pos.append([end_x, end_y, end_z])
-                    target_robot_pos.insert(0, [x_dist, 0, min(-y_dist, 0.2)])
-                    LOCK.release()
-                    
-                    images_color = cv2.putText(color_image, msg, (center_x, center_y), cv2.FONT_HERSHEY_SIMPLEX, 
-                    0.6, (255, 255, 255), 2, cv2.LINE_AA)
+                    num_data += 1
+                    if num_data >= num_sample:
+                        
+                        x_val = x_data / num_data
+                        y_val = y_data / num_data
+                        z_val = z_data / num_data
+                        
+                        
+                        vec_RE_bot = EE_SLEEP_ROBOT
+                        vec_CE_cam = EE_SLEEP_CAM
+                        vec_CP_cam = np.array([x_val, y_val, z_val])
+                        
+                        vec_EP_cam = vec_CP_cam - vec_CE_cam
+                        vec_EP_bot = np.matmul(ROT_MAT, vec_EP_cam)
+                        
+                        vec_RP_bot = vec_RE_bot + vec_EP_bot
+                        end_pos = vec_RP_bot
+                        
+                        # end_pos = np.matmul(MAT_TRANSFORM, np.array([x_val, x_val, z_val, 1]))
+                        if print_sol:
+                            print(end_pos)
+                        
+                        end_x = end_pos[0]
+                        end_y = end_pos[1]
+                        end_z = end_pos[2]
+                        
+                        x_dist = x_data - X_BASE
+                        y_dist = (y_data - Y_BASE) - 0.1 
+                        
+                        LOCK.acquire()
+                        global target_robot_pos
+                        target_robot_pos.clear()
+                        target_robot_pos.insert(0, [end_x, end_y, end_z])
+                        # target_robot_pos.insert(0, [x_dist, 0, min(-y_dist, 0.2)])
+                        LOCK.release()
+                        
+                        
+                        
+                        x_data = 0
+                        y_data = 0
+                        z_data = 0 
+                        num_data = 0
                 # print(depth_frame.get_distance(center_x, center_y))
             
+            msg = "x: {:.6f}m y: {:.6f}m z: {:.6f}m".format(x_val, y_val, z_val)
+            if print_raw:
+                print(msg)
+                
+            cv2.putText(
+                color_image, 
+                msg, 
+                (center_x, center_y), 
+                cv2.FONT_HERSHEY_SIMPLEX, 
+                0.6, 
+                (255, 255, 255), 
+                2, 
+                cv2.LINE_AA
+            )
             cv2.drawContours(depth_colormap, contour_use, -1, (255, 255, 255), 3)
             # cv2.drawContours(res, contour_use, -1, (255, 255, 255), 3)
                 
@@ -243,22 +298,25 @@ def run_robot(bot: InterbotixManipulatorXS):
 
             bot.arm.go_to_sleep_pose()
             bot.gripper.release()
-            bot.arm.set_ee_pose_components(x=data[0], y=data[1], z=data[2])
+            if bot.arm.set_ee_pose_components(x=data[0], y=data[1], z=data[2]):
             # bot.arm.set_ee_cartesian_trajectory(x=data[0], y=data[1], z=data[2])
             # bot.arm.s
-            time.sleep(1)
-            bot.gripper.grasp()
-            
-            time.sleep(2)
-            bot.arm.go_to_sleep_pose()
-            bot.gripper.release()
+                time.sleep(1)
+                bot.gripper.grasp()
+                
+                time.sleep(2)
+                bot.arm.set_ee_pose_components(x=0, y=-0.25, z=0.25)
+                bot.gripper.release()
 
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, handler)
     bot = InterbotixManipulatorXS("px100", "arm", "gripper")
     
+    print_xyz = False
+    print_pos = False
+    num_sample = 15
     
-    thread_find_pos = threading.Thread(target=find_robot_go_pos, args=[False, False])
+    thread_find_pos = threading.Thread(target=find_robot_go_pos, args=[print_xyz, print_pos, num_sample])
     thread_drive_bot = threading.Thread(target=run_robot, args=[bot])
     
     
